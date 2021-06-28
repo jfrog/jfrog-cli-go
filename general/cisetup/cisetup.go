@@ -211,17 +211,17 @@ func (cc *CiSetupCommand) Run() error {
 		if err != nil {
 			return err
 		}
-		ciSpecificInstructions, err = cc.getPipelinesCompletionInstruction(ciFileName)
+		ciSpecificInstructions, err = cc.getPiplinesCompletionInstruction(ciFileName)
 		if err != nil {
 			return err
 		}
 	case cisetup.Jenkins:
 		// Create and stage Jenkinsfile.
-		_, err := cc.runJenkinsPhase()
+		ciFileName, err := cc.runJenkinsPhase()
 		if err != nil {
 			return err
 		}
-		ciSpecificInstructions = cc.getJenkinsCompletionInstruction()
+		ciSpecificInstructions = cc.getJenkinsCompletionInstruction(ciFileName)
 	case cisetup.GithubActions:
 		// Create and stage main.yml.
 		ciFileName, err := cc.runGithubActionsPhase()
@@ -433,7 +433,7 @@ func (cc *CiSetupCommand) saveCiConfigToFile(ciConfig []byte, fileName string) e
 	return ioutil.WriteFile(path, ciConfig, 0644)
 }
 
-func (cc *CiSetupCommand) getPipelinesCompletionInstruction(pipelinesFileName string) ([]string, error) {
+func (cc *CiSetupCommand) getPiplinesCompletionInstruction(pipelinesFileName string) ([]string, error) {
 	serviceDetails, err := utilsconfig.GetSpecificConfig(cisetup.ConfigServerId, false, false)
 	if err != nil {
 		return []string{}, err
@@ -452,13 +452,13 @@ func (cc *CiSetupCommand) getPipelinesCompletionInstruction(pipelinesFileName st
 		getPipelineUiPath(serviceDetails.Url, pipelinesFileName), ""}, nil
 }
 
-func (cc *CiSetupCommand) getJenkinsCompletionInstruction() []string {
+func (cc *CiSetupCommand) getJenkinsCompletionInstruction(jenkinsFileName string) []string {
 	JenkinsCompletionInstruction := []string{"", colorTitle("Completing the setup"),
 		"We configured the JFrog Platform and generated a Jenkinsfile file for you under " + cc.data.LocalDirPath,
 		"To complete the setup, follow these steps:",
 		"* Open the Jenkinsfile for edit."}
 	// M2_HOME instructions relevant only for Maven
-	if cc.data.BuiltTechnology.Type == cisetup.Maven {
+	if cc.data.BuiltTechnologies[cisetup.Maven] != nil {
 		JenkinsCompletionInstruction = append(JenkinsCompletionInstruction,
 			"* Inside the 'environment' section, set the value of the M2_HOME variable,",
 			"  to the Maven installation directory on the Jenkins agent (the directory which includes the 'bin' directory).")
@@ -507,8 +507,8 @@ func (cc *CiSetupCommand) getGithubActionsCompletionInstruction(githubActionFile
 		""}
 }
 
-func (cc *CiSetupCommand) logCompletionInstruction(ciSpecificInstructions []string) error {
-	instructions := append(ciSpecificInstructions,
+func (cc *CiSetupCommand) logCompletionInstruction(ciSpecificInstractions []string) error {
+	instructions := append(ciSpecificInstractions,
 		colorTitle("Allowing developers to access this pipeline from their IDE"),
 		"You have the option of viewing the new pipeline's runs from within IntelliJ IDEA.",
 		"To achieve this, follow these steps:",
@@ -618,15 +618,16 @@ func (cc *CiSetupCommand) artifactoryConfigPhase() (err error) {
 	if err != nil {
 		return err
 	}
+	cc.data.BuiltTechnologies = make(map[cisetup.Technology]*cisetup.TechnologyInfo)
 	// First create repositories for the selected technology.
 	for tech, detected := range cc.data.DetectedTechnologies {
 		if detected && coreutils.AskYesNo(fmt.Sprintf("Would you like to use %s to build the code?", tech), true) {
-			cc.data.BuiltTechnology = &cisetup.TechnologyInfo{Type: tech}
+			cc.data.BuiltTechnologies[tech] = &cisetup.TechnologyInfo{}
 			err = cc.interactivelyCreateRepos(tech)
 			if err != nil {
 				return
 			}
-			cc.getBuildCmd()
+			cc.getBuildCmd(tech)
 			return nil
 		}
 	}
@@ -643,7 +644,8 @@ func (cc *CiSetupCommand) printDetectedTechs() error {
 	if len(techs) == 0 {
 		return errorutils.CheckError(errors.New("no supported technology was found in the project"))
 	}
-	return writeToScreen("The next step is to provide the commands to build your code. It looks like the code is built with " + getExplicitTechsListByNumber(techs) + ".\n")
+	writeToScreen("The next step is to provide the commands to build your code. It looks like the code is built with " + getExplicitTechsListByNumber(techs) + ".\n")
+	return nil
 }
 
 // Get the explicit list of technologies, for ex: "maven, gradle and npm"
@@ -654,17 +656,16 @@ func getExplicitTechsListByNumber(techs []string) string {
 	return strings.Join(techs[0:len(techs)-1], ", ") + " and " + techs[len(techs)-1]
 }
 
-func (cc *CiSetupCommand) getBuildCmd() {
-	defaultBuildCmd := buildCmdByTech[cc.data.BuiltTechnology.Type]
-	// Use the cached build command only if the chosen built technology wasn't changed.
-	if cc.defaultData.BuiltTechnology != nil && cc.defaultData.BuiltTechnology.Type == cc.data.BuiltTechnology.Type {
-		if cc.defaultData.BuiltTechnology.BuildCmd != "" {
-			defaultBuildCmd = cc.defaultData.BuiltTechnology.BuildCmd
+func (cc *CiSetupCommand) getBuildCmd(tech cisetup.Technology) {
+	defaultBuildCmd := buildCmdByTech[tech]
+	if info, built := cc.defaultData.BuiltTechnologies[tech]; built {
+		if info.BuildCmd != "" {
+			defaultBuildCmd = info.BuildCmd
 		}
 	}
 	// Ask for working build command.
-	prompt := "Please provide a single-line " + string(cc.data.BuiltTechnology.Type) + " build command."
-	ioutils.ScanFromConsole(prompt, &cc.data.BuiltTechnology.BuildCmd, defaultBuildCmd)
+	prompt := "Please provide a single-line " + string(tech) + " build command."
+	ioutils.ScanFromConsole(prompt, &cc.data.BuiltTechnologies[tech].BuildCmd, defaultBuildCmd)
 }
 
 func (cc *CiSetupCommand) interactivelyCreateRepos(technologyType cisetup.Technology) (err error) {
@@ -708,7 +709,7 @@ func (cc *CiSetupCommand) interactivelyCreateRepos(technologyType cisetup.Techno
 						log.Error(err)
 					} else {
 						// We created both remote and virtual repositories successfully
-						cc.data.BuiltTechnology.VirtualRepo = repoName
+						cc.data.BuiltTechnologies[technologyType].VirtualRepo = repoName
 						return
 					}
 				}
@@ -756,7 +757,7 @@ func (cc *CiSetupCommand) interactivelyCreateRepos(technologyType cisetup.Techno
 		}
 	}
 	// Saves the new created repo name (key) in the results data structure.
-	cc.data.BuiltTechnology.VirtualRepo = virtualRepo
+	cc.data.BuiltTechnologies[technologyType].VirtualRepo = virtualRepo
 	return
 }
 
@@ -969,7 +970,7 @@ func (cc *CiSetupCommand) ciProviderPhase() (err error) {
 			continue
 		}
 		if ciType == cisetup.Pipelines {
-			// validate that pipelines is available.
+			// validate that pipelines is aviable
 			serviceDetails, err := config.GetSpecificConfig(cisetup.ConfigServerId, false, false)
 			if err != nil {
 				log.Error(err)
@@ -1004,13 +1005,10 @@ func (cc *CiSetupCommand) ciProviderPhase() (err error) {
 				cc.data.CiType = cisetup.CiType(ciType)
 				return nil
 			}
-			log.Error(err)
 			if _, ok := err.(*pipelinesservices.PipelinesNotAvailableError); ok {
-				err = inactivePipelinesNote()
-				if err != nil {
-					log.Error(err)
-				}
+				inactivePipelinesNote()
 			}
+			log.Error(err)
 		} else { // The user doesn't choose Pipelines.
 			cc.data.CiType = cisetup.CiType(ciType)
 			return nil

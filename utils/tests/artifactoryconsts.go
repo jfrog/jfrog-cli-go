@@ -5,8 +5,7 @@ import (
 	"path/filepath"
 
 	"github.com/jfrog/jfrog-cli-core/artifactory/utils"
-	servicesutils "github.com/jfrog/jfrog-client-go/artifactory/services/utils"
-	clientutils "github.com/jfrog/jfrog-client-go/utils"
+	clientutils "github.com/jfrog/jfrog-client-go/artifactory/services/utils"
 )
 
 const (
@@ -61,6 +60,8 @@ const (
 	GitLfsAssertSpec                       = "git_lfs_assert_spec.json"
 	GitLfsTestRepositoryConfig             = "git_lfs_test_repository_config.json"
 	GoLocalRepositoryConfig                = "go_local_repository_config.json"
+	GoRemoteRepositoryConfig               = "go_remote_repository_config.json"
+	GoVirtualRepositoryConfig              = "go_virtual_repository_config.json"
 	GradleConfig                           = "gradle.yaml"
 	GradleRemoteRepositoryConfig           = "gradle_remote_repository_config.json"
 	GradleRepositoryConfig                 = "gradle_repository_config.json"
@@ -133,7 +134,9 @@ var (
 	DistRepo1        = "cli-tests-dist1"
 	DistRepo2        = "cli-tests-dist2"
 	DockerRepo       = "cli-tests-docker"
-	GoRepo           = "cli-tests-go"
+	GoLocalRepo      = "cli-tests-go-local"
+	GoRemoteRepo     = "cli-tests-go-remote"
+	GoVirtualRepo    = "cli-tests-go-virtual"
 	GradleRepo       = "cli-tests-gradle"
 	MvnRemoteRepo    = "cli-tests-mvn-remote"
 	GradleRemoteRepo = "cli-tests-gradle-remote"
@@ -1677,8 +1680,8 @@ func GetExpectedUploadSummaryDetails(RtUrl string) []clientutils.FileTransferDet
 	}
 }
 
-func GetReplicationConfig() []servicesutils.ReplicationParams {
-	return []servicesutils.ReplicationParams{
+func GetReplicationConfig() []clientutils.ReplicationParams {
+	return []clientutils.ReplicationParams{
 		{
 			Url:                    *RtUrl + "targetRepo",
 			Username:               "admin",

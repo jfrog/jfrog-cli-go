@@ -10,6 +10,7 @@ import (
 
 const (
 	// Artifactory's Commands Keys
+	RtConfig                = "rt-config"
 	DeleteConfig            = "delete-config"
 	Upload                  = "upload"
 	Download                = "download"
@@ -170,6 +171,7 @@ const (
 	uploadRecursive       = uploadPrefix + recursive
 	uploadFlat            = uploadPrefix + flat
 	uploadRegexp          = uploadPrefix + regexpFlag
+	uploadRetries         = uploadPrefix + retries
 	uploadExplode         = uploadPrefix + explode
 	uploadProps           = uploadPrefix + props
 	uploadTargetProps     = uploadPrefix + targetProps
@@ -183,6 +185,7 @@ const (
 	downloadPrefix       = "download-"
 	downloadRecursive    = downloadPrefix + recursive
 	downloadFlat         = downloadPrefix + flat
+	downloadRetries      = downloadPrefix + retries
 	downloadExplode      = downloadPrefix + explode
 	downloadProps        = downloadPrefix + props
 	downloadExcludeProps = downloadPrefix + excludeProps
@@ -561,10 +564,6 @@ var flagsMap = map[string]cli.Flag{
 		Value: "",
 		Usage: "[Default: " + strconv.Itoa(Threads) + "] Number of working threads.` `",
 	},
-	retries: cli.StringFlag{
-		Name:  retries,
-		Usage: "[Default: " + strconv.Itoa(Retries) + "] Number of HTTP retries.` `",
-	},
 	insecureTls: cli.BoolFlag{
 		Name:  insecureTls,
 		Usage: "[Default: false] Set to true to skip TLS certificates verification.` `",
@@ -619,6 +618,10 @@ var flagsMap = map[string]cli.Flag{
 		Name:  antFlag,
 		Usage: "[Default: false] Set to true to use an ant pattern instead of wildcards expression to collect files to upload.` `",
 	},
+	uploadRetries: cli.StringFlag{
+		Name:  retries,
+		Usage: "[Default: " + strconv.Itoa(Retries) + "] Number of upload retries.` `",
+	},
 	dryRun: cli.BoolFlag{
 		Name:  dryRun,
 		Usage: "[Default: false] Set to true to disable communication with Artifactory.` `",
@@ -669,6 +672,10 @@ var flagsMap = map[string]cli.Flag{
 		Name:  splitCount,
 		Value: "",
 		Usage: "[Default: " + strconv.Itoa(DownloadSplitCount) + "] Number of parts to split a file when downloading. Set to 0 for no splits.` `",
+	},
+	downloadRetries: cli.StringFlag{
+		Name:  retries,
+		Usage: "[Default: " + strconv.Itoa(Retries) + "] Number of download retries.` `",
 	},
 	downloadExplode: cli.BoolFlag{
 		Name:  explode,
@@ -1230,13 +1237,18 @@ var commandFlags = map[string][]string{
 		interactive, encPassword, configPlatformUrl, configRtUrl, distUrl, configXrUrl, configMcUrl, configPlUrl, configUser, configPassword, configApiKey, configAccessToken, sshKeyPath, clientCertPath,
 		clientCertKeyPath, basicAuthOnly, configInsecureTls,
 	},
+	// Deprecated
+	RtConfig: {
+		interactive, encPassword, url, distUrl, user, password, apikey, accessToken, sshKeyPath, clientCertPath,
+		clientCertKeyPath, basicAuthOnly, configInsecureTls,
+	},
 	DeleteConfig: {
 		deleteQuiet,
 	},
 	Upload: {
 		url, user, password, apikey, accessToken, sshPassPhrase, sshKeyPath, serverId, clientCertPath, targetProps,
 		clientCertKeyPath, spec, specVars, buildName, buildNumber, module, uploadExcludePatterns, uploadExclusions, deb,
-		uploadRecursive, uploadFlat, uploadRegexp, retries, dryRun, uploadExplode, symlinks, includeDirs,
+		uploadRecursive, uploadFlat, uploadRegexp, uploadRetries, dryRun, uploadExplode, symlinks, includeDirs,
 		uploadProps, failNoOp, threads, uploadSyncDeletes, syncDeletesQuiet, insecureTls, detailedSummary, project,
 		uploadAnt, uploadArchive,
 	},
@@ -1244,38 +1256,36 @@ var commandFlags = map[string][]string{
 		url, user, password, apikey, accessToken, sshPassPhrase, sshKeyPath, serverId, clientCertPath,
 		clientCertKeyPath, spec, specVars, buildName, buildNumber, module, excludePatterns, exclusions, sortBy,
 		sortOrder, limit, offset, downloadRecursive, downloadFlat, build, includeDeps, excludeArtifacts, minSplit, splitCount,
-		retries, dryRun, downloadExplode, validateSymlinks, bundle, includeDirs, downloadProps, downloadExcludeProps,
+		downloadRetries, dryRun, downloadExplode, validateSymlinks, bundle, includeDirs, downloadProps, downloadExcludeProps,
 		failNoOp, threads, archiveEntries, downloadSyncDeletes, syncDeletesQuiet, insecureTls, detailedSummary, project,
 	},
 	Move: {
 		url, user, password, apikey, accessToken, sshPassPhrase, sshKeyPath, serverId, clientCertPath,
 		clientCertKeyPath, spec, specVars, excludePatterns, exclusions, sortBy, sortOrder, limit, offset, moveRecursive,
-		moveFlat, dryRun, build, includeDeps, excludeArtifacts, moveProps, moveExcludeProps, failNoOp, threads, archiveEntries,
-		insecureTls, retries,
+		moveFlat, dryRun, build, includeDeps, excludeArtifacts, moveProps, moveExcludeProps, failNoOp, threads, archiveEntries, insecureTls,
 	},
 	Copy: {
 		url, user, password, apikey, accessToken, sshPassPhrase, sshKeyPath, serverId, clientCertPath,
 		clientCertKeyPath, spec, specVars, excludePatterns, exclusions, sortBy, sortOrder, limit, offset, copyRecursive,
-		copyFlat, dryRun, build, includeDeps, excludeArtifacts, bundle, copyProps, copyExcludeProps, failNoOp, threads,
-		archiveEntries, insecureTls, retries,
+		copyFlat, dryRun, build, includeDeps, excludeArtifacts, bundle, copyProps, copyExcludeProps, failNoOp, threads, archiveEntries, insecureTls,
 	},
 	Delete: {
 		url, user, password, apikey, accessToken, sshPassPhrase, sshKeyPath, serverId, clientCertPath,
 		clientCertKeyPath, spec, specVars, excludePatterns, exclusions, sortBy, sortOrder, limit, offset,
 		deleteRecursive, dryRun, build, includeDeps, excludeArtifacts, deleteQuiet, deleteProps, deleteExcludeProps, failNoOp, threads, archiveEntries,
-		insecureTls, retries,
+		insecureTls,
 	},
 	Search: {
 		url, user, password, apikey, accessToken, sshPassPhrase, sshKeyPath, serverId, clientCertPath,
 		clientCertKeyPath, spec, specVars, excludePatterns, exclusions, sortBy, sortOrder, limit, offset,
 		searchRecursive, build, includeDeps, excludeArtifacts, count, bundle, includeDirs, searchProps, searchExcludeProps, failNoOp, archiveEntries,
-		insecureTls, searchTransitive, retries,
+		insecureTls, searchTransitive,
 	},
 	Properties: {
 		url, user, password, apikey, accessToken, sshPassPhrase, sshKeyPath, serverId, clientCertPath,
 		clientCertKeyPath, spec, specVars, excludePatterns, exclusions, sortBy, sortOrder, limit, offset,
 		propsRecursive, build, includeDeps, excludeArtifacts, bundle, includeDirs, failNoOp, threads, archiveEntries, propsProps, propsExcludeProps,
-		insecureTls, retries,
+		insecureTls,
 	},
 	BuildPublish: {
 		url, user, password, apikey, accessToken, sshPassPhrase, sshKeyPath, serverId, buildUrl, bpDryRun,
@@ -1312,7 +1322,7 @@ var commandFlags = map[string][]string{
 	},
 	GitLfsClean: {
 		url, user, password, apikey, accessToken, sshPassPhrase, sshKeyPath, serverId, refs, glcRepo, glcDryRun,
-		glcQuiet, insecureTls, retries,
+		glcQuiet, insecureTls,
 	},
 	MvnConfig: {
 		global, serverIdResolve, serverIdDeploy, repoResolveReleases, repoResolveSnapshots, repoDeployReleases, repoDeploySnapshots,
@@ -1322,10 +1332,10 @@ var commandFlags = map[string][]string{
 		deployIvyDesc, ivyDescPattern, ivyArtifactsPattern,
 	},
 	Mvn: {
-		buildName, buildNumber, deploymentThreads, insecureTls, project, detailedSummary,
+		buildName, buildNumber, deploymentThreads, insecureTls, project,
 	},
 	Gradle: {
-		buildName, buildNumber, deploymentThreads, project, detailedSummary,
+		buildName, buildNumber, deploymentThreads, project,
 	},
 	DockerPromote: {
 		targetDockerImage, sourceTag, targetTag, dockerPromoteCopy, url, user, password, apikey, accessToken, sshPassPhrase, sshKeyPath,
@@ -1333,7 +1343,7 @@ var commandFlags = map[string][]string{
 	},
 	ContainerPush: {
 		buildName, buildNumber, module, url, user, password, apikey, accessToken, sshPassPhrase, sshKeyPath,
-		serverId, skipLogin, threads, project, detailedSummary,
+		serverId, skipLogin, threads, project,
 	},
 	ContainerPull: {
 		buildName, buildNumber, module, url, user, password, apikey, accessToken, sshPassPhrase, sshKeyPath,
@@ -1373,7 +1383,7 @@ var commandFlags = map[string][]string{
 		global, serverIdResolve, serverIdDeploy, repoResolve, repoDeploy,
 	},
 	GoPublish: {
-		deps, self, url, user, password, apikey, accessToken, deprecatedserverId, buildName, buildNumber, module, project, detailedSummary,
+		deps, self, url, user, password, apikey, accessToken, deprecatedserverId, buildName, buildNumber, module, project,
 	},
 	Go: {
 		noRegistry, publishDeps, deprecatedUrl, deprecatedUser, deprecatedPassword, deprecatedApikey,
@@ -1488,7 +1498,7 @@ var commandFlags = map[string][]string{
 func GetCommandFlags(cmd string) []cli.Flag {
 	flagList, ok := commandFlags[cmd]
 	if !ok {
-		log.Error("The command \"", cmd, "\" is not found in commands flags map.")
+		log.Error("The command \"", cmd, "\" does not found in commands flags map.")
 		return nil
 	}
 	return buildAndSortFlags(flagList)

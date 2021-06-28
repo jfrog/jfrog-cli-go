@@ -8,7 +8,6 @@ import (
 	"errors"
 	"fmt"
 	"github.com/jfrog/jfrog-cli-core/common/commands"
-	"github.com/jfrog/jfrog-cli-core/common/spec"
 	"github.com/jfrog/jfrog-client-go/artifactory"
 	"io"
 	"io/ioutil"
@@ -28,10 +27,12 @@ import (
 
 	"github.com/jfrog/jfrog-cli-core/utils/coreutils"
 	coretests "github.com/jfrog/jfrog-cli-core/utils/tests"
+	serviceutils "github.com/jfrog/jfrog-client-go/artifactory/services/utils"
 
 	"github.com/buger/jsonparser"
 	gofrogio "github.com/jfrog/gofrog/io"
 	"github.com/jfrog/jfrog-cli-core/artifactory/commands/generic"
+	"github.com/jfrog/jfrog-cli-core/artifactory/spec"
 	"github.com/jfrog/jfrog-cli-core/artifactory/utils"
 	"github.com/jfrog/jfrog-cli-core/utils/config"
 	"github.com/jfrog/jfrog-cli/inttestutils"
@@ -378,48 +379,37 @@ func TestAqlFindingItemOnRoot(t *testing.T) {
 func TestExitCode(t *testing.T) {
 	initArtifactoryTest(t)
 
-	// Upload dummy file in order to test move and copy commands
-	artifactoryCli.Exec("upload", path.Join("testdata", "a", "a1.in"), tests.RtRepo1)
-
-	// Discard output logging to prevent negative logs
-	previousLogger := tests.RedirectLogOutputToNil()
-	defer log.SetLogger(previousLogger)
-
-	// Test upload commands
 	err := artifactoryCli.Exec("upload", "DummyText", tests.RtRepo1, "--fail-no-op=true")
 	checkExitCode(t, coreutils.ExitCodeError, err)
-	err = artifactoryCli.Exec("upload", path.Join("testdata", "a", "a1.in"), "DummyTargetPath")
+	err = artifactoryCli.Exec("upload", path.Join("testdata", "a", "a1.in"), "tests.Repo1")
 	checkExitCode(t, coreutils.ExitCodeError, err)
 	err = artifactoryCli.Exec("upload", "testdata/a/(*.dummyExt)", tests.RtRepo1+"/{1}.in", "--fail-no-op=true")
 	checkExitCode(t, coreutils.ExitCodeFailNoOp, err)
 
-	// Test download command
 	err = artifactoryCli.Exec("dl", "DummyFolder", "--fail-no-op=true")
 	checkExitCode(t, coreutils.ExitCodeFailNoOp, err)
 
-	// Test move commands
+	//upload dummy file inorder to test move & copy
+	artifactoryCli.Exec("upload", path.Join("testdata", "a", "a1.in"), tests.RtRepo1)
 	err = artifactoryCli.Exec("move", tests.RtRepo1, "DummyTargetPath")
 	checkExitCode(t, coreutils.ExitCodeError, err)
 	err = artifactoryCli.Exec("move", "DummyText", tests.RtRepo1, "--fail-no-op=true")
 	checkExitCode(t, coreutils.ExitCodeFailNoOp, err)
 
-	// Test copy commands
 	err = artifactoryCli.Exec("copy", tests.RtRepo1, "DummyTargetPath")
 	checkExitCode(t, coreutils.ExitCodeError, err)
 	err = artifactoryCli.Exec("copy", "DummyText", tests.RtRepo1, "--fail-no-op=true")
 	checkExitCode(t, coreutils.ExitCodeFailNoOp, err)
 
-	// Test delete command
 	err = artifactoryCli.Exec("delete", "DummyText", "--fail-no-op=true")
 	checkExitCode(t, coreutils.ExitCodeFailNoOp, err)
 
-	// Test search command
 	err = artifactoryCli.Exec("s", "DummyText", "--fail-no-op=true")
 	checkExitCode(t, coreutils.ExitCodeFailNoOp, err)
 
-	// Test props commands
 	err = artifactoryCli.Exec("sp", "DummyText", "prop=val;key=value", "--fail-no-op=true")
 	checkExitCode(t, coreutils.ExitCodeFailNoOp, err)
+
 	err = artifactoryCli.Exec("delp", "DummyText", "prop=val;key=value", "--fail-no-op=true")
 	checkExitCode(t, coreutils.ExitCodeFailNoOp, err)
 
@@ -2027,7 +2017,7 @@ func testArtifactoryDeleteFoldersNoSpec(t *testing.T, contentOnly bool) {
 	} else {
 		expectedStatusCode = http.StatusNotFound
 	}
-	resp, body, _, err := client.SendGet(serverDetails.ArtifactoryUrl+"api/storage/"+tests.RtRepo1+"/test_resources", true, artHttpDetails, "")
+	resp, body, _, err := client.SendGet(serverDetails.ArtifactoryUrl+"api/storage/"+tests.RtRepo1+"/test_resources", true, artHttpDetails)
 	assert.NoError(t, err)
 	assert.Equal(t, expectedStatusCode, resp.StatusCode, "test_resources shouldn't be deleted: "+tests.RtRepo1+"/test_resources/ "+string(body))
 
@@ -3627,8 +3617,8 @@ func TestUploadDetailedSummary(t *testing.T) {
 	reader := result.Reader()
 	assert.NoError(t, reader.GetError())
 	defer reader.Close()
-	var files []clientutils.FileTransferDetails
-	for transferDetails := new(clientutils.FileTransferDetails); reader.NextRecord(transferDetails) == nil; transferDetails = new(clientutils.FileTransferDetails) {
+	var files []serviceutils.FileTransferDetails
+	for transferDetails := new(serviceutils.FileTransferDetails); reader.NextRecord(transferDetails) == nil; transferDetails = new(serviceutils.FileTransferDetails) {
 		files = append(files, *transferDetails)
 	}
 	assert.ElementsMatch(t, files, tests.GetExpectedUploadSummaryDetails(*tests.RtUrl))
@@ -3637,6 +3627,7 @@ func TestUploadDetailedSummary(t *testing.T) {
 
 func createUploadConfiguration() *utils.UploadConfiguration {
 	uploadConfiguration := new(utils.UploadConfiguration)
+	uploadConfiguration.Retries = cliutils.Retries
 	uploadConfiguration.Threads = cliutils.Threads
 	return uploadConfiguration
 }
@@ -3945,7 +3936,7 @@ func TestArtifactoryDeleteExcludeProps(t *testing.T) {
 }
 
 func getAllBuildsByBuildName(client *httpclient.HttpClient, buildName string, t *testing.T, expectedHttpStatusCode int) buildsApiResponseStruct {
-	resp, body, _, _ := client.SendGet(serverDetails.ArtifactoryUrl+"api/build/"+buildName, true, artHttpDetails, "")
+	resp, body, _, _ := client.SendGet(serverDetails.ArtifactoryUrl+"api/build/"+buildName, true, artHttpDetails)
 	assert.Equal(t, expectedHttpStatusCode, resp.StatusCode, "Failed retrieving build information from artifactory.")
 
 	buildsApiResponse := &buildsApiResponseStruct{}
@@ -4030,7 +4021,7 @@ func execDeleteUser(username string) {
 }
 
 func getAllRepos() (repositoryKeys []string, err error) {
-	servicesManager, err := utils.CreateServiceManager(serverDetails, -1, false)
+	servicesManager, err := utils.CreateServiceManager(serverDetails, false)
 	if err != nil {
 		return nil, err
 	}
@@ -4054,7 +4045,7 @@ func execListBuildNamesRest() ([]string, error) {
 	}
 
 	// Send get request
-	resp, body, _, err := client.SendGet(serverDetails.ArtifactoryUrl+"api/build", true, artHttpDetails, "")
+	resp, body, _, err := client.SendGet(serverDetails.ArtifactoryUrl+"api/build", true, artHttpDetails)
 	if err != nil {
 		return nil, err
 	}
@@ -4099,7 +4090,7 @@ func execCreateRepoRest(repoConfig, repoName string) {
 		log.Error(err)
 		os.Exit(1)
 	}
-	resp, body, err := client.SendPut(serverDetails.ArtifactoryUrl+"api/repositories/"+repoName, content, artHttpDetails, "")
+	resp, body, err := client.SendPut(serverDetails.ArtifactoryUrl+"api/repositories/"+repoName, content, artHttpDetails)
 	if err != nil {
 		log.Error(err)
 		os.Exit(1)
@@ -4112,7 +4103,7 @@ func execCreateRepoRest(repoConfig, repoName string) {
 }
 
 func getAllUsernames() (usersnames []string, err error) {
-	servicesManager, err := utils.CreateServiceManager(serverDetails, -1, false)
+	servicesManager, err := utils.CreateServiceManager(serverDetails, false)
 	if err != nil {
 		return nil, err
 	}
@@ -4246,7 +4237,7 @@ func isRepoExist(repoName string) bool {
 		log.Error(err)
 		os.Exit(1)
 	}
-	resp, _, _, err := client.SendGet(serverDetails.ArtifactoryUrl+tests.RepoDetailsUrl+repoName, true, artHttpDetails, "")
+	resp, _, _, err := client.SendGet(serverDetails.ArtifactoryUrl+tests.RepoDetailsUrl+repoName, true, artHttpDetails)
 	if err != nil {
 		log.Error(err)
 		os.Exit(1)
@@ -4500,7 +4491,7 @@ func TestArtifactoryReplicationCreate(t *testing.T) {
 	assert.NoError(t, err)
 
 	// Validate create replication
-	servicesManager, err := utils.CreateServiceManager(serverDetails, -1, false)
+	servicesManager, err := utils.CreateServiceManager(serverDetails, false)
 	assert.NoError(t, err)
 	result, err := servicesManager.GetReplication(tests.RtRepo1)
 	assert.NoError(t, err)
@@ -4795,7 +4786,7 @@ func TestUploadWithAntPatternAndExclusionsSpec(t *testing.T) {
 
 func TestPermissionTargets(t *testing.T) {
 	initArtifactoryTest(t)
-	servicesManager, err := utils.CreateServiceManager(serverDetails, -1, false)
+	servicesManager, err := utils.CreateServiceManager(serverDetails, false)
 	if err != nil {
 		assert.NoError(t, err)
 		return
@@ -4835,9 +4826,12 @@ func assertPermissionTarget(t *testing.T, manager artifactory.ArtifactoryService
 }
 
 func assertPermissionTargetDeleted(t *testing.T, manager artifactory.ArtifactoryServicesManager) {
-	permission, err := manager.GetPermissionTarget(tests.RtPermissionTargetName)
-	assert.NoError(t, err)
-	assert.Nil(t, permission)
+	_, err := manager.GetPermissionTarget(tests.RtPermissionTargetName)
+	if err == nil {
+		assert.Error(t, err)
+		return
+	}
+	assert.Contains(t, err.Error(), "404")
 }
 
 func cleanPermissionTarget() {

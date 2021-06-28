@@ -7,9 +7,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
-	"github.com/jfrog/jfrog-cli-core/common/spec"
 	"github.com/jfrog/jfrog-cli/utils/summary"
-	clientutils "github.com/jfrog/jfrog-client-go/utils"
 	"io/ioutil"
 	"math/rand"
 	"os"
@@ -27,12 +25,12 @@ import (
 	corelog "github.com/jfrog/jfrog-cli-core/utils/log"
 
 	"github.com/jfrog/jfrog-cli-core/artifactory/commands/generic"
+	"github.com/jfrog/jfrog-cli-core/artifactory/spec"
 	artUtils "github.com/jfrog/jfrog-cli-core/artifactory/utils"
 	"github.com/jfrog/jfrog-cli-core/utils/config"
 	"github.com/jfrog/jfrog-cli-core/utils/coreutils"
 	"github.com/stretchr/testify/assert"
 
-	commandutils "github.com/jfrog/jfrog-cli-core/artifactory/commands/utils"
 	"github.com/jfrog/jfrog-client-go/artifactory/services/utils"
 	"github.com/jfrog/jfrog-client-go/auth"
 	"github.com/jfrog/jfrog-client-go/utils/errorutils"
@@ -301,7 +299,7 @@ func DeleteFiles(deleteSpec *spec.SpecFiles, serverDetails *config.ServerDetails
 
 // This function makes no assertion, caller is responsible to assert as needed.
 func GetBuildInfo(serverDetails *config.ServerDetails, buildName, buildNumber string) (pbi *buildinfo.PublishedBuildInfo, found bool, err error) {
-	servicesManager, err := artUtils.CreateServiceManager(serverDetails, -1, false)
+	servicesManager, err := artUtils.CreateServiceManager(serverDetails, false)
 	if err != nil {
 		return nil, false, err
 	}
@@ -315,7 +313,9 @@ var reposConfigMap = map[*string]string{
 	&DistRepo1:        DistributionRepoConfig1,
 	&DistRepo2:        DistributionRepoConfig2,
 	&DockerRepo:       DockerRepoConfig,
-	&GoRepo:           GoLocalRepositoryConfig,
+	&GoLocalRepo:      GoLocalRepositoryConfig,
+	&GoRemoteRepo:     GoRemoteRepositoryConfig,
+	&GoVirtualRepo:    GoVirtualRepositoryConfig,
 	&GradleRepo:       GradleRepositoryConfig,
 	&MvnRepo1:         MavenRepositoryConfig1,
 	&MvnRepo2:         MavenRepositoryConfig2,
@@ -365,7 +365,7 @@ func GetNonVirtualRepositories() map[*string]string {
 		TestArtifactory:  {&RtRepo1, &RtRepo2, &RtLfsRepo, &RtDebianRepo},
 		TestDistribution: {&DistRepo1, &DistRepo2},
 		TestDocker:       {&DockerRepo},
-		TestGo:           {&GoRepo},
+		TestGo:           {&GoLocalRepo, &GoRemoteRepo, &GoVirtualRepo},
 		TestGradle:       {&GradleRepo, &GradleRemoteRepo},
 		TestMaven:        {&MvnRepo1, &MvnRepo2, &MvnRemoteRepo},
 		TestNpm:          {&NpmRepo, &NpmRemoteRepo},
@@ -441,7 +441,9 @@ func getSubstitutionMap() map[string]string {
 		"${GRADLE_REPO}":               GradleRepo,
 		"${NPM_REPO}":                  NpmRepo,
 		"${NPM_REMOTE_REPO}":           NpmRemoteRepo,
-		"${GO_REPO}":                   GoRepo,
+		"${GO_LOCAL_REPO}":             GoLocalRepo,
+		"${GO_REMOTE_REPO}":            GoRemoteRepo,
+		"${GO_VIRTUAL_REPO}":           GoVirtualRepo,
 		"${RT_SERVER_ID}":              RtServerId,
 		"${RT_URL}":                    *RtUrl,
 		"${RT_API_KEY}":                *RtApiKey,
@@ -474,7 +476,9 @@ func AddTimestampToGlobalVars() {
 	DockerRepo += timestampSuffix
 	DistRepo1 += timestampSuffix
 	DistRepo2 += timestampSuffix
-	GoRepo += timestampSuffix
+	GoLocalRepo += timestampSuffix
+	GoRemoteRepo += timestampSuffix
+	GoVirtualRepo += timestampSuffix
 	GradleRemoteRepo += timestampSuffix
 	GradleRepo += timestampSuffix
 	MvnRemoteRepo += timestampSuffix
@@ -619,18 +623,7 @@ func RedirectLogOutputToBuffer() (buffer *bytes.Buffer, previousLog log.Log) {
 	return buffer, previousLog
 }
 
-// Set new logger with output redirection to a null logger. This is useful for negative tests.
-// Caller is responsible to set the old log back.
-func RedirectLogOutputToNil() (previousLog log.Log) {
-	previousLog = log.Logger
-	newLog := log.NewLogger(corelog.GetCliLogLevel(), nil)
-	newLog.SetOutputWriter(ioutil.Discard)
-	newLog.SetLogsWriter(ioutil.Discard)
-	log.SetLogger(newLog)
-	return previousLog
-}
-
-func VerifySha256DetailedSummaryFromBuffer(t *testing.T, buffer *bytes.Buffer, logger log.Log) {
+func VerifySha256DetailedSummary(t *testing.T, buffer *bytes.Buffer, logger log.Log) {
 	content := buffer.Bytes()
 	buffer.Reset()
 	logger.Output(string(content))
@@ -640,22 +633,10 @@ func VerifySha256DetailedSummaryFromBuffer(t *testing.T, buffer *bytes.Buffer, l
 	assert.NoError(t, err)
 
 	assert.Equal(t, summary.Success, result.Status)
-	assert.True(t, result.Totals.Success > 0)
+	assert.Equal(t, 1, result.Totals.Success)
 	assert.Equal(t, 0, result.Totals.Failure)
 	// Verify a sha256 was returned
 	assert.NotEmpty(t, result.Sha256Array, "Summary validation failed - no sha256 has returned from Artifactory.")
-	for _, sha256 := range result.Sha256Array {
-		// Verify sha256 is valid (a string size 256 characters) and not an empty string.
-		assert.Equal(t, 64, len(sha256.Sha256Str), "Summary validation failed - invalid sha256 has returned from artifactory")
-	}
-}
-
-func VerifySha256DetailedSummaryFromResult(t *testing.T, result *commandutils.Result) {
-	result.Reader()
-	reader := result.Reader()
-	defer reader.Close()
-	assert.NoError(t, reader.GetError())
-	for transferDetails := new(clientutils.FileTransferDetails); reader.NextRecord(transferDetails) == nil; transferDetails = new(clientutils.FileTransferDetails) {
-		assert.Equal(t, 64, len(transferDetails.Sha256), "Summary validation failed - invalid sha256 has returned from artifactory")
-	}
+	// Verify sha256 is valid (a string size 256 characters) and not an empty string.
+	assert.Equal(t, 64, len(result.Sha256Array[0].Sha256Str), "Summary validation failed - invalid sha256 has returned from artifactory")
 }
