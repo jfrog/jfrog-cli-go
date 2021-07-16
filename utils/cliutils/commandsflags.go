@@ -247,6 +247,7 @@ const (
 	sourceRepo          = "source-repo"
 	includeDependencies = "include-dependencies"
 	copyFlag            = "copy"
+	failFast            = "fail-fast"
 
 	async = "async"
 
@@ -774,6 +775,10 @@ var flagsMap = map[string]cli.Flag{
 		Name:  copyFlag,
 		Usage: "[Default: false] If set true, the build artifacts and dependencies are copied to the target repository, otherwise they are moved.` `",
 	},
+	failFast: cli.BoolTFlag{
+		Name:  failFast,
+		Usage: "[Default: true] If set true, fail and abort the operation upon receiving an error.` `",
+	},
 	bprDryRun: cli.BoolFlag{
 		Name:  dryRun,
 		Usage: "[Default: false] If true, promotion is only simulated. The build is not promoted.` `",
@@ -1220,7 +1225,7 @@ var commandFlags = map[string][]string{
 	},
 	BuildPromote: {
 		url, user, password, accessToken, sshPassPhrase, sshKeyPath, serverId, status, comment,
-		sourceRepo, includeDependencies, copyFlag, bprDryRun, bprProps, InsecureTls, project,
+		sourceRepo, includeDependencies, copyFlag, failFast, bprDryRun, bprProps, InsecureTls, project,
 	},
 	BuildDiscard: {
 		url, user, password, accessToken, sshPassPhrase, sshKeyPath, serverId, maxDays, maxBuilds,
